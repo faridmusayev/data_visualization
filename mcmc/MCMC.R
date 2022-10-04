@@ -1,96 +1,142 @@
 
-# Metropolis Random Walk for Poisson regression
-
+# libraries
+library(here)
 library(ggplot2)
+library(gridExtra)
 library(mvtnorm)
 
-data <- read.table("eBayNumberOfBidderData.dat", header = TRUE)
-names(data)[1] <- "target"
-X <- as.matrix(data[, -1])
-y <- as.matrix(data[, 1])
 
-# Bayesian analysis of the Poisson regression
+# Maximum likelihood estimator of Beta in the Poisson regression model
 
-# Prior: beta ~ N(0, 100*inv((t(X)*X))), where X is the n x p covariate matrix
+df <- read.table("eBayNumberOfBidderData.dat", header = TRUE)
 
-Sigma <- 100 * solve(t(X) %*% X)
-mean = rep(0, 9)
-betas_init = rep(0, 9)
+df_woc <- df[, -2] # data frame without Const
 
-# Posterior is assumed multivariate normal: N(beta_mode, inv(J_x(beta_mode))))
+poisson_reg <- glm(formula = nBids ~ ., data = df_woc, family = poisson(link = "log"))
 
-# LogPosterior:
-logPost <- function(betas, mean, Sigma, X, y){
-  logPrior <- dmvnorm(x = betas, mean = mean, sigma = Sigma, log = TRUE)
-  # unknown parameters in regression are betas. 
-  # This is why we write prior for them
-  linPred <- X %*% betas
-  logLik <- sum(linPred * y - exp(linPred)) #LogLikelihood for the Poisson Model
-  return(logPrior + logLik)
+print(summary(poisson_reg))
+# Essential covariates are VerifyID, Sealed, LogBook, MinBidShare
+
+
+
+X <- as.matrix(df[, -1])
+y <- as.matrix(df[, 1])
+features_dim <- dim(X)[2]
+
+# prior mean 'mu' and prior covariance matrix 'prior_covmat'
+prior_covmat <- 100 * solve(t(X)%*%X)
+mu <- rep(0, features_dim) 
+
+# initial Beta parameters
+betas_init <- rep(0,features_dim)
+
+logposterior <- function(betas, X, y, mu, sigma){
+  
+  # transform matrix beta into single column vector
+  betas = as.vector(betas)
+  
+  # log-likelihood for poisson regression model
+  loglik <- sum((X %*% betas) * y) - sum(exp(X %*% betas))
+  
+  # log-normal prior
+  logprior <- dmvnorm(betas, mean = mu, sigma = sigma, log = TRUE)
+  
+  return(loglik + logprior)
 }
 
-mode_optim <- optim(betas_init, logPost, gr=NULL, mean, Sigma, X, y, 
-                    method=c("BFGS"), control=list(fnscale=-1), hessian=TRUE)
+# perform optimization
+optim_result <- optim(par = betas_init,  # initial values for parameters
+                      fn = logposterior, # function to be minimized
+                      gr = NULL, 
+                      X, y, mu, prior_covmat, # arguments of function to be minimized
+                      method = c("BFGS"), 
+                      control = list(fnscale = -1), # minimize negative logposterior
+                      hessian = TRUE)
 
-# Name the coefficient by covariates
-names(mode_optim$par) <- names(as.data.frame(X))
+# calculated posterior mode aka Beta parameters
+posterior_betas <- optim_result$par
+names(posterior_betas) <- colnames(X)
 
-# Compute approximate standard deviations.
-approxPostStd <- sqrt(diag(-solve(mode_optim$hessian))) 
-# Name the coefficient by covariates
-names(approxPostStd) <- names(as.data.frame(X))
+# calculated posterior covariance matrix by using hessian matrix from optim function
+posterior_covmat <- -solve(optim_result$hessian)
 
-post_mean = mode_optim$par
-print('The posterior mode is')
-print(post_mean)
-print('The approximate posterior standard deviation is')
-print(approxPostStd)
-post_cov_mat <- -solve(mode_optim$hessian)
-print('The posterior covariance matrix is')
-print(post_cov_mat)
+
+# Function for Random Walk Metropolis Algorithm
+random_walk_metropolis <- function(c, logposterior){ 
+  
+  c = c # tuning parameter
+  N <- 1000 # number of iterations for algorithm
+  
+  # matrix for storing all accepted draws 
+  thetas <- matrix(0, nrow = N, ncol = features_dim) # accepted draws are stored here
+  # set counter for rejection rate
+  rejection_rate <- 0  
+  # store alpha values for comparison and evaluation of average acceptance probability
+  alphas <- c()
+  
+  # run Random Walk Metropolis algorithm in for loop for N draws
+  for (i in 2:N){
+    
+    # simulate sample proposal from proposed distribution
+    sample_proposal <- rmvnorm(1, mean = thetas[i - 1, ], sigma = c * posterior_covmat)
+    
+    # evaluate probability for sample proposal
+    p_sample_proposal <- logposterior(betas = sample_proposal, X, y, mu, prior_covmat)
+    
+    # evaluate probability for the last accepted draw
+    p_last_accepted_draw <- logposterior(betas = thetas[i - 1, ], X, y, mu, prior_covmat)
+    
+    # calculate acceptance probability
+    alpha <- min(1, exp(p_sample_proposal - p_last_accepted_draw)) # use exp because of logs
+    alphas[i] <- round(alpha, 2) # this is just for myself, no need to store in reality
+    
+    # generate random number from uniform distribution
+    U <- runif(1)
+    # compare it with acceptance probability and if lower
+    if (U < alpha){
+      # add sample proposal to matrix of accepted draws
+      thetas[i, ] <- sample_proposal
+      
+    }else{
+      # if not accepted add to current i iteration of thetas a previous value i - 1
+      thetas[i, ] <- thetas[i - 1, ]
+      rejection_rate <- rejection_rate + 1
+    }
+    
+  } 
+  cat("Average acceptance rate = ", 
+      1 - rejection_rate/N) 
+  
+  # or mean(alphas) where alpha is acceptance probability
+  print(mean(alphas, na.rm = TRUE))
+  # return accepted draws
+  return(thetas)
+}
 
 N <- 1000
-random_walk_metropolis <- function(logPost, c = 1){
-  theta <- matrix(NA, ncol = 9, nrow = N)
-  theta[1, ] <- rep(0, 9)
-  accept_rate <- 1
-  for (i in 2:N){
-    proposed <- as.vector(rmvnorm(1, mean = theta[i-1, ], sigma=c*post_cov_mat))
-    post_prev <-logPost(betas = theta[i-1, ], mean, Sigma, X, y)
-    post_new <- logPost(betas = proposed, mean, Sigma, X, y)
-    accept_pr <- min(1, exp(post_new - post_prev))
-    u <- runif(1)
-    if (u <= accept_pr){
-      theta[i, ] <- proposed
-      accept_rate <- accept_rate + 1
-    }
-    else{
-      theta[i, ] <- theta[i-1, ]
-    }
-  }
-  print("Acceptance rate is")
-  print(accept_rate/N)
-  return(theta)
-}
+thetas <- random_walk_metropolis(c = 1, logposterior = logposterior)
 
-theta <- random_walk_metropolis(logPost)
+# Graphical representation of convergence
+results <- cbind(iterations = c(1:N), as.data.frame(thetas))
+colnames(results)[-1] <- colnames(X)
 
-df_plot <- data.frame(x = 1:N, VerifyId = theta[, 3], Sealed = theta[, 4], 
-                      Logbook = theta[, 8], MinBidShare = theta[, 9])
+pl <- ggplot(data = results) +
+  geom_line(aes(x = iterations, y = VerifyID, color = "P1")) +
+  geom_line(aes(x = iterations, y = Sealed, color = "P2")) +
+  geom_line(aes(x = iterations, y = LogBook, color = "P3")) +
+  geom_line(aes(x = iterations, y = MinBidShare, color = "P4")) +
+  scale_color_manual(name = 'Parameters:', 
+                     values = c(P1 = "darkblue", P2 = "orange",
+                                P3 = "darkgrey", P4 = "black")) +
+  labs(x = "Iteration #", y = "Parameter Value") +
+  theme_minimal() +
+  theme(legend.position = "top", 
+        legend.text = element_text(size = 12),
+        legend.title = element_text(face = 'bold'))
 
-plot <- ggplot(df_plot, aes(x = x)) + 
-  theme_bw() + labs(title = NULL) +
-  geom_line(aes(y = VerifyId, color = "1"), size = 1) +
-  geom_line(aes(y = Sealed, color = "2"), size = 1) +
-  geom_line(aes(y = Logbook, color = "3"), size = 1) +
-  geom_line(aes(y = MinBidShare, color = "4"), size = 1) +
-  xlab("Iteration #") + ylab("Parameter value") + 
-  scale_color_manual(values = c("royalblue", "orange", "darkgreen", "darkgray"),
-                     labels = c("VerifyId", "Sealed", "LogBook", "MinBidShare"),
-                     name = "Parameter") +
-  theme(title = element_text(size = 12, face = 'bold'),
-        axis.title = element_text(size = 10, face = "plain"))
-
-print(plot)
+plot(pl)  
 
 ggsave('mcmc.svg', width = 8, height = 6)
+
+
+
