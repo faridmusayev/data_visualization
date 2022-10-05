@@ -62,7 +62,7 @@ df <- data.frame(sim_vars = sim_vars,
 pl <- ggplot(data = df) + 
   geom_line(aes(x = ndraws, y = sim_vars), size = 0.4, color = "orange") + 
   labs(title = "Simulated Variances at each iteration", 
-       x = "Draw #", y = "Simulated variance") +
+       x = "Iteration #", y = "Simulated variance") +
   theme_minimal() +
   theme(title = element_text(size = 12, face = 'bold'),
         axis.title = element_text(size = 12, face = "plain"))
@@ -71,7 +71,7 @@ pl <- ggplot(data = df) +
 pl2 <- ggplot(data = df) + 
   geom_line(aes(x = ndraws, y = sim_means), size = 0.4, color = "darkblue") + 
   labs(title = "Simulated Means at each iteration", 
-       x = "Draw #", y = "Simulated mean") +
+       x = "Iteration #", y = "Simulated mean") +
   theme_minimal() +
   theme(title = element_text(size = 12, face = 'bold'),
         axis.title = element_text(size = 12, face = "plain"))
@@ -79,7 +79,7 @@ pl2 <- ggplot(data = df) +
 pl3 <- ggplot(data = df) + 
   geom_line(aes(x = ndraws, y = avg_sim_vars), size = 0.4, color = "orange") + 
   labs(title = "Average of simulated variances at each iteration", 
-       x = "Draw #", y = "Simulated variance") +
+       x = "Iteration #", y = "Simulated variance") +
   theme_minimal() +
   theme(title = element_text(size = 12, face = 'bold'),
         axis.title = element_text(size = 12, face = "plain"))
@@ -87,7 +87,7 @@ pl3 <- ggplot(data = df) +
 pl4 <- ggplot(data = df) + 
   geom_line(aes(x = ndraws, y = avg_sim_means), size = 0.4, color = "darkblue") + 
   labs(title = "Average of simulated means at each iteration", 
-       x = "Draw #", y = "Simulated mean") +
+       x = "Iteration #", y = "Simulated mean") +
   theme_minimal() +
   theme(title = element_text(size = 12, face = 'bold'),
         axis.title = element_text(size = 12, face = "plain"))

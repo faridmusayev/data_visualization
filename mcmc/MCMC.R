@@ -18,7 +18,6 @@ print(summary(poisson_reg))
 # Essential covariates are VerifyID, Sealed, LogBook, MinBidShare
 
 
-
 X <- as.matrix(df[, -1])
 y <- as.matrix(df[, 1])
 features_dim <- dim(X)[2]
